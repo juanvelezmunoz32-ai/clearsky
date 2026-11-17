@@ -4,7 +4,7 @@ from pathlib import Path
 from ultralytics import YOLO
 import torch
 
-EXCLUDED_CLASSES = {"paper"}
+EXCLUDED_CLASSES = {"paper", "clothes", "metal"}
 
 class GarbageDetector:
     def __init__(self, model_path='garbage_detection_best.pt', conf=0.25):
@@ -70,7 +70,7 @@ class GarbageDetector:
     
     def get_primary_detection(self, frame):
         """Return the highest-confidence class prediction and its model box."""
-        results = self.model(frame, conf=0.01)
+        results = self.model(frame, conf=self.conf)
         if not results or len(results[0].boxes) == 0:
             return None
 

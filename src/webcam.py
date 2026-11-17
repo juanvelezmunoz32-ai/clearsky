@@ -1,54 +1,89 @@
-"""Webcam classification - supports both standard and YOLO models"""
-import cv2
-import torch
-import sys
+"""Live webcam classification and YOLO detection."""
 from pathlib import Path
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
-from classify import visualize_model_predictions
+import cv2
+import torch
 
-USE_YOLO = True  # Set to True to use YOLO detection
 
-if USE_YOLO:
-    from detect_yolo import GarbageDetector
-    detector = GarbageDetector('../garbage_detection_best.pt', conf=0.25)
-else:
-    model_ft = torch.load("../model_ft.pth", weights_only=False, map_location=torch.device('cpu'))
-    model_ft.eval()
+USE_YOLO = True
+CAMERA_INDEX = 0
+LOW_LIGHT_THRESHOLD = 60.0
+MODEL_DIR = Path(__file__).resolve().parent.parent
 
-cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-cv2.namedWindow("Classification", cv2.WINDOW_NORMAL)
 
-print("Classification Active! Press 'q' to quit")
-
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
-    
+def main():
     if USE_YOLO:
-        primary, conf = detector.get_primary(frame, use_classification=True)
-        text = f"{primary} ({conf:.2f})" if primary else "No detection"
-       # detections, frame = detector.detect(
-       #     frame,
-       #     return_image=True,
-        #     filter_full_image=False
-        # )
-        # text = ", ".join(
-        #     f"{detection['class']} ({detection['confidence']:.2f})"
-        #     for detection in detections
-        # ) or "No detection"
-    else:
-        text = visualize_model_predictions(model_ft, frame)
-    
-    cv2.putText(frame, text, (50, 50), cv2.FONT_HERSHEY_DUPLEX, 1, (0, 255, 0), 2)
-    cv2.imshow("Classification", frame)
-    
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+        from detect_yolo import GarbageDetector
 
-cap.release()
-cv2.destroyAllWindows()
+        detector = GarbageDetector(str(MODEL_DIR / "garbage_detection_best.pt"), conf=0.025)
+        model_ft = None
+    else:
+        from classify import visualize_model_predictions
+
+        model_ft = torch.load(
+            MODEL_DIR / "model_ft.pth",
+            weights_only=False,
+            map_location=torch.device("cpu"),
+        )
+        model_ft.eval()
+        detector = None
+
+    cap = cv2.VideoCapture(CAMERA_INDEX)
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open webcam {CAMERA_INDEX}")
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cv2.namedWindow("Garbage Detection", cv2.WINDOW_NORMAL)
+    print("Webcam detection active. Press 'q' to quit.")
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Could not read a frame from the webcam.")
+                break
+
+            brightness = cv2.mean(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))[0]
+
+            if USE_YOLO:
+                primary, confidence = detector.get_primary(frame)
+                detection_text = (
+                    f"{primary} ({confidence:.2f})" if primary else "No detection"
+                )
+            else:
+                detection_text = visualize_model_predictions(model_ft, frame)
+
+            cv2.putText(
+                frame,
+                detection_text,
+                (20, 35),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+            )
+            light_text = f"Brightness: {brightness:.0f}/255"
+            light_color = (0, 0, 255) if brightness < LOW_LIGHT_THRESHOLD else (0, 255, 0)
+            if brightness < LOW_LIGHT_THRESHOLD:
+                light_text += " - low light, add illumination"
+            cv2.putText(
+                frame,
+                light_text,
+                (20, 68),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                light_color,
+                2,
+            )
+            cv2.imshow("Garbage Detection", frame)
+
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()
